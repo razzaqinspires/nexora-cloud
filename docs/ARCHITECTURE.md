@@ -1,34 +1,42 @@
-# Nexora Cloud Architecture — v0.1
+# Nexora Cloud Architecture — v0.2.0
 
-## Deployment split
+This document is the concise entry point. The full, normative design is in `PRIVATE-ZERO-COST-ARCHITECTURE.md`.
 
-- **Vercel:** Next.js dashboard, documentation, HTTPS control-plane API.
-- **PostgreSQL:** project registry and API-key hashes. Use a managed database for the first release.
-- **Compute host (future phase):** Docker/Compose services for persistent Node.js bots, workers, and backend processes.
-- **Object storage (future phase):** S3-compatible bucket (for example Cloudflare R2) for media and backups.
+## Deployment model
+
+- **Owner-controlled host:** runs the Nexora dashboard/API, PostgreSQL and future project containers.
+- **Docker Compose:** single-host runtime for the initial private deployment.
+- **PostgreSQL 17:** persistent named Docker volume; no managed Free-tier database is required.
+- **Private network:** `nexora_private`; internal app-to-app requests use Docker service DNS.
+- **Admin interface:** bound to `127.0.0.1:3000` by default. LAN/VPN access is a deliberate later configuration after firewall tests.
+- **Vercel:** preview/demo only, not the production source of truth for a business infrastructure platform.
 
 ## Request flow
 
-`Whiskay / AISYAH backend → HTTPS → Nexora Cloud API (Vercel) → PostgreSQL`
+Same-host project service:
 
-A later runtime control service will provision or update containers on the compute host. The Vercel control plane must never expose the Docker socket or unrestricted host SSH credentials to client requests.
+`Whiskay / AISYAH / RPG container → http://app:3000/api/v1 → Nexora app → PostgreSQL private network`
 
-## Security requirements before public multi-user hosting
+The Docker database service does not publish port 5432 to the host. The Compose network is not a replacement for per-project authorization; each service must use its own key and only its granted scopes.
 
-1. Separate admin identity from project API keys; rotate admin secret if exposed.
-2. Store only hashes of API keys; add revocation and rotation endpoints before production expansion.
-3. Add rate limiting/WAF at the edge and audit logs for admin operations.
-4. Restrict database network access where provider supports it; enforce TLS.
-5. Do not allow user-supplied container images/commands until sandboxing, resource quotas, image scanning, and isolation are implemented.
-6. Add backup schedules and restore tests; database backups alone do not protect object media.
+## Data durability
 
-## Scaling path
+- `nexora_pgdata` stores active database files.
+- `scripts/backup-postgres.sh` creates custom-format PostgreSQL dumps.
+- Backups must be copied to a second, separate device and encrypted.
+- `scripts/restore-postgres.sh` requires an explicit `RESTORE_CONFIRM=YES` before overwriting objects.
+- A monthly restore drill is required before storing irreplaceable data.
 
-- **0.1:** project registry, key issue, identity check.
-- **0.2:** key revoke/rotate, audit logs, rate limiting, usage metering.
-- **0.3:** storage API with short-lived signed upload/download URLs.
-- **0.4:** compute agent on a Docker host; deploy/restart/status endpoints with strict allowlists.
-- **0.5:** per-project resource quotas, logs/metrics, backup/restore workflow.
-- **1.0:** customer tenancy, billing, multi-node orchestration, documented SLOs.
+## Security boundaries
 
-Start with Docker Compose on one VPS for a trusted internal workload. Do not begin with Kubernetes; adopt K3s/Kubernetes only when multi-node scheduling, service discovery, or tenant scale justifies the operational cost.
+The current application is a project registry/API identity prototype. It is not yet approved for public exposure. Before production add key revocation/rotation, database-backed audit logs, rate limiting, per-project DB roles, validated TLS for remote DB connections, and full authorization tests. Never expose Docker socket, host SSH credentials, shell commands, or unrestricted image deployment through an API.
+
+## Roadmap
+
+1. Host inventory and secure OS preparation.
+2. Private Compose deployment and persistent PostgreSQL.
+3. Off-host backup + restore test.
+4. WireGuard remote administration, if reachable via public IP or supported topology.
+5. Project API keys and narrowly scoped internal integrations.
+6. Storage service, compute agent, resource limits, logs and metrics.
+7. Public endpoint only after domain/network/abuse controls and owner approval.

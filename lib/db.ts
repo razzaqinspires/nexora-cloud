@@ -10,7 +10,8 @@ export function db() {
       max: 5,
       idleTimeoutMillis: 10_000,
       connectionTimeoutMillis: 5_000,
-      ssl: process.env.DATABASE_URL.includes('localhost') ? undefined : { rejectUnauthorized: false }
+      // Local Docker-network traffic is private. Remote database TLS must verify its certificate.
+      ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: true } : false
     });
   }
   return global.nexoraPgPool;
