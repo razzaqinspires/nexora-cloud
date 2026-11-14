@@ -39,7 +39,7 @@ Research snapshot: 14 November 2026. Facts below are based on current official p
 
 ### Framework baseline
 - Next.js support policy identifies 16.x as Active LTS and 15.x as Maintenance LTS, with Next.js 15 security maintenance extended through 31 January 2027.
-- The v0.2 package has been updated to Next.js 16.4.6 and React 19.3.1, but dependencies have not been installed or built in this export environment. Run install, lockfile generation, lint, build, and regression tests before deployment.
+- The v0.3 package uses Next.js 16.4.6, React 19.3.1, Node.js 22, and an externalized `pg` server package for Node server routes. Dependencies could not be installed in the export environment, so a complete Next.js build remains unverified. Run install, lockfile generation, lint, build, and regression tests before deployment.
 - Sources: https://nextjs.org/support-policy and https://www.npmjs.com/package/next
 
 ### Dynamic DNS and public HTTPS
@@ -47,6 +47,14 @@ Research snapshot: 14 November 2026. Facts below are based on current official p
 - Caddy can automate public HTTPS when the hostname resolves to the server and external HTTP/HTTPS ports are reachable; private-only deployments can remain behind VPN instead.
 - Decision: public publishing is deferred. First test ISP public IPv4/IPv6 reachability and router control. Do not assume a free hostname solves CGNAT.
 - Sources: https://www.duckdns.org/spec.jsp and https://caddyserver.com/docs/quick-starts/https
+
+### v0.3.0 automation and backup
+- The local `npm start` command runs an idempotent bootstrap that creates missing configuration/secrets, validates Docker/Compose, starts PostgreSQL, runs a migration job, starts the app and backup worker, then waits for API health.
+- Migrations use an advisory lock and `CREATE TABLE IF NOT EXISTS`; project registration is idempotent by slug and does not issue a second API key for an existing project.
+- A dedicated worker produces daily PostgreSQL custom dumps, AES-256-CBC encrypts them with PBKDF2, creates an HMAC-SHA256 sidecar using a domain-separated derived key, and verifies decryption/archive readability.
+- Backup worker writes to local `./backups` only. It is not an off-site copy and does not provide WAL archiving/PITR.
+- The docs website, metadata endpoint, and OpenAPI document dynamically resolve the deployment origin; `NEXORA_PUBLIC_URL` is the canonical override for a future official domain.
+- Static bootstrap checks and encryption/HMAC round-trip checks pass. No Docker daemon or PostgreSQL server was available in this build environment; full container/database acceptance remains outstanding.
 
 ## Architecture decision
 
@@ -86,3 +94,10 @@ Trade-offs:
 8. API keys have independent revocation/rotation, scope enforcement, and audit logs before wider project integration.
 9. Framework lockfile, dependency security audit, lint, build, and integration tests pass.
 10. Owner understands local-host uptime limitations and authorizes any future public network exposure.
+
+
+## Additional v0.3.0 safety validation
+
+- Before generating secrets, the bootstrap checks whether the explicit named Docker volume `nexora_pgdata` already exists. If the data volume exists but `.env` or a required high-entropy secret is missing, it stops and requests the original offline credential copy instead of silently rotating credentials.
+- Vercel origin resolution uses the current deployment hostname (`VERCEL_URL`) before the production project hostname fallback, so Preview API documentation does not accidentally point at the production deployment. `NEXORA_PUBLIC_URL` remains the canonical override for an officially owned domain.
+- Direct dependency versions are pinned in `package.json`; versions were checked against [Next.js](https://www.npmjs.com/package/next), [React](https://www.npmjs.com/package/react), [node-postgres](https://www.npmjs.com/package/pg), and [Zod](https://www.npmjs.com/package/zod) on 14 November 2026.

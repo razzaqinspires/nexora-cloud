@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nexora}
-      POSTGRES_USER: ${POSTGRES_USER:-nexora}
+      POSTGRES_USER: ${POSTGRES_USER:-nexora_owner}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       NEXORA_APP_DB_USER: ${NEXORA_APP_DB_USER:-nexora_app}
       NEXORA_APP_DB_PASSWORD: ${NEXORA_APP_DB_PASSWORD:?Set NEXORA_APP_DB_PASSWORD in .env}
@@ -15,36 +15,94 @@ services:
       - ./db/schema.sql:/docker-entrypoint-initdb.d/02-schema.sql:ro
       - ./db/init/03-grant-app-role.sh:/docker-entrypoint-initdb.d/03-grant-app-role.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexora} -d ${POSTGRES_DB:-nexora}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexora_owner} -d ${POSTGRES_DB:-nexora}"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 20s
     networks:
       - nexora_db
-    # No host port is published for PostgreSQL.
+    # PostgreSQL never publishes port 5432 to the host or public internet.
 
-  app:
+  migrate:
+    image: nexora-cloud:0.3.0
     build:
       context: .
       dockerfile: Dockerfile
-    image: nexora-cloud:0.2.0
-    restart: unless-stopped
+    restart: "no"
+    command: ["node", "scripts/migrate.mjs"]
+    environment:
+      NEXORA_MIGRATION_DATABASE_URL: postgres://${POSTGRES_USER:-nexora_owner}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-nexora}
+      NEXORA_APP_DB_USER: ${NEXORA_APP_DB_USER:-nexora_app}
+      NEXORA_APP_DB_PASSWORD: ${NEXORA_APP_DB_PASSWORD:?Set NEXORA_APP_DB_PASSWORD in .env}
+      NEXORA_DATABASE_SSL: "false"
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - nexora_db
+
+  app:
+    image: nexora-cloud:0.3.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["npm", "run", "start:app"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      HOSTNAME: 0.0.0.0
       PORT: "3000"
       DATABASE_URL: postgres://${NEXORA_APP_DB_USER:-nexora_app}:${NEXORA_APP_DB_PASSWORD}@db:5432/${POSTGRES_DB:-nexora}
-      DATABASE_SSL: "false"
+      NEXORA_DATABASE_SSL: "false"
       NEXORA_ADMIN_TOKEN: ${NEXORA_ADMIN_TOKEN:?Set NEXORA_ADMIN_TOKEN in .env}
+      NEXORA_PUBLIC_URL: ${NEXORA_PUBLIC_URL:-}
+      NEXORA_RUNTIME_MODE: self-hosted
     ports:
-      # Local-host only by default. Keep private until a VPN/firewall rule is configured.
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${NEXORA_LOCAL_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - nexora_private
+      - nexora_db
+
+  backup:
+    image: nexora-cloud-backup:0.3.0
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    restart: unless-stopped
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/opt/nexora/backup-loop.sh"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nexora}
+      POSTGRES_USER: ${POSTGRES_USER:-nexora_owner}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      NEXORA_BACKUP_ENCRYPTION_KEY: ${NEXORA_BACKUP_ENCRYPTION_KEY:?Set NEXORA_BACKUP_ENCRYPTION_KEY in .env}
+      NEXORA_BACKUP_RETENTION_DAYS: ${NEXORA_BACKUP_RETENTION_DAYS:-30}
+      NEXORA_BACKUP_INTERVAL_SECONDS: ${NEXORA_BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - ./scripts/backup-loop.sh:/opt/nexora/backup-loop.sh:ro
+      - ./scripts/backup-health.sh:/opt/nexora/backup-health.sh:ro
+      - ./backups:/backups
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/bin/sh", "/opt/nexora/backup-health.sh"]
+      interval: 1h
+      timeout: 5s
+      retries: 2
+      start_period: 10m
+    networks:
       - nexora_db
 
 networks:

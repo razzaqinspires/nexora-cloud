@@ -1,42 +1,35 @@
-# Nexora Cloud Architecture — v0.2.0
-
-This document is the concise entry point. The full, normative design is in `PRIVATE-ZERO-COST-ARCHITECTURE.md`.
+# Nexora Cloud Architecture — v0.3.0
 
 ## Deployment model
 
-- **Owner-controlled host:** runs the Nexora dashboard/API, PostgreSQL and future project containers.
-- **Docker Compose:** single-host runtime for the initial private deployment.
-- **PostgreSQL 17:** persistent named Docker volume; no managed Free-tier database is required.
-- **Private network:** `nexora_private`; internal app-to-app requests use Docker service DNS.
-- **Admin interface:** bound to `127.0.0.1:3000` by default. LAN/VPN access is a deliberate later configuration after firewall tests.
-- **Vercel:** preview/demo only, not the production source of truth for a business infrastructure platform.
+- **Self-hosted source of truth:** Docker Compose on an owner-controlled machine.
+- **PostgreSQL 17:** persistent Docker named volume `nexora_pgdata`.
+- **Migration job:** one-shot, serialized by PostgreSQL advisory lock; runs before app startup.
+- **Backup worker:** daily encrypted logical dump, HMAC sidecar, archive verification, local retention and healthcheck.
+- **Private networking:** database/migration/backup share `nexora_db`; approved project services use `nexora_private` to reach the API.
+- **Admin interface:** bound to `127.0.0.1:3000` by default.
+- **Vercel:** temporary dashboard/API preview only; no persistent database volume or Docker host there.
 
-## Request flow
+## One-command start
 
-Same-host project service:
+`npm start` runs the local idempotent bootstrap: create missing `.env` secrets, validate host/configuration, start PostgreSQL, run migrations, start app and backup, then wait for health. Existing secret values and the named database volume are preserved. See `AUTOMATED-BOOTSTRAP.md`.
 
-`Whiskay / AISYAH / RPG container → http://app:3000/api/v1 → Nexora app → PostgreSQL private network`
+## API and domain resolution
 
-The Docker database service does not publish port 5432 to the host. The Compose network is not a replacement for per-project authorization; each service must use its own key and only its granted scopes.
+- Website documentation: `/docs`
+- Runtime metadata: `/api/v1/meta`
+- Machine-readable OpenAPI: `/api/v1/openapi.json`
+- Health: `/api/v1/health`
 
-## Data durability
+`NEXORA_PUBLIC_URL` is the canonical origin override. Otherwise Vercel's assigned deployment hostname or the local request hostname is used. No domain is hard-coded in source.
 
-- `nexora_pgdata` stores active database files.
-- `scripts/backup-postgres.sh` creates custom-format PostgreSQL dumps.
-- Backups must be copied to a second, separate device and encrypted.
-- `scripts/restore-postgres.sh` requires an explicit `RESTORE_CONFIRM=YES` before overwriting objects.
-- A monthly restore drill is required before storing irreplaceable data.
+## Data durability boundary
 
-## Security boundaries
+- `nexora_pgdata` persists through container lifecycle changes.
+- Backups are encrypted and authenticated, but stored on the same host in v0.3.0.
+- Off-host copies, WAL archiving/PITR, host replication, and failover remain future work.
+- Do not use `docker compose down -v` or `docker volume prune` on the live host.
 
-The current application is a project registry/API identity prototype. It is not yet approved for public exposure. Before production add key revocation/rotation, database-backed audit logs, rate limiting, per-project DB roles, validated TLS for remote DB connections, and full authorization tests. Never expose Docker socket, host SSH credentials, shell commands, or unrestricted image deployment through an API.
+## Current API scope
 
-## Roadmap
-
-1. Host inventory and secure OS preparation.
-2. Private Compose deployment and persistent PostgreSQL.
-3. Off-host backup + restore test.
-4. WireGuard remote administration, if reachable via public IP or supported topology.
-5. Project API keys and narrowly scoped internal integrations.
-6. Storage service, compute agent, resource limits, logs and metrics.
-7. Public endpoint only after domain/network/abuse controls and owner approval.
+Project registry, one-time API-key issuance, project identity verification, deployment metadata, health, and OpenAPI specification. Full API key rotation/revocation, rate limiting, audit trails, per-project database provisioning, storage API, and compute scheduling are not yet implemented.

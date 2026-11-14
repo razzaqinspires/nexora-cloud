@@ -1,126 +1,72 @@
 # NEXORA CLOUD — Private Control Plane
 
-**Razzaq Ventures · v0.2.0 · Private / Internal / Proprietary**
+**Razzaq Ventures · v0.3.0 · Confidential / Internal / Proprietary**
 
-Nexora Cloud is an internal project-infrastructure control plane. It is intended to coordinate project identity and service APIs for Whiskay, AISYAH/Nexora AI, Whiskay RPG, and approved Razzaq Ventures projects.
+Nexora Cloud is the private infrastructure control plane intended to coordinate project identity, API access, persistent database state, and service operations for Whiskay, AISYAH/Nexora AI, Whiskay RPG, Razzaq Ventures websites, and approved internal projects.
 
-This release adds a self-hosted Docker Compose foundation. It deliberately avoids making a free managed database or a Vercel Hobby deployment the production source of truth.
+## One command on the self-hosted machine
 
-## Important boundary
-
-Rp0 means no new subscription or infrastructure purchase when the owner already has suitable always-on hardware, network, power, and separate backup storage. It does **not** mean free 24/7 uptime, SLA, redundant hardware, or disaster recovery. If no suitable host exists, this is a development/lab deployment until hardware becomes available.
-
-## What exists in this release
-
-- Next.js dashboard and API documentation.
-- PostgreSQL project registry and API-key hashes.
-- Admin-only project registration endpoint.
-- One-time `nx_live_...` project API-key issuance.
-- Project identity endpoint.
-- Dockerfile and Docker Compose stack for self-hosting.
-- Persistent PostgreSQL volume; no database host port published.
-- Separate PostgreSQL owner and non-superuser runtime role.
-- Local PostgreSQL backup script and host preflight script.
-- Private network, confidentiality, and recovery guidance.
-
-## Not yet production-complete
-
-This is not yet a public cloud hosting service. It does not provision arbitrary containers, provide multi-node scheduling, object-storage service, per-project database lifecycle, API-key revocation/rotation endpoints, full audit logging, rate limiting, billing, public signup, or HA failover. Those features are deliberately deferred until the private host is validated.
-
-## 1. Prepare the host
-
-Recommended starting point: Debian 13 stable or supported Ubuntu LTS, 4 CPU cores, 8 GB RAM, and 100 GB free SSD for a small multi-project node. A 2-core/4-GB/40-GB machine may be used for a lab/control-plane-only trial.
-
-Run the read-only inventory script:
+After installing Node.js 22.x and the official Docker Engine + Compose plugin, run:
 
 ```bash
-bash scripts/host-preflight.sh
+npm start
 ```
 
-Install Docker Engine and the Compose plugin from the official Docker instructions for the host OS. Do not use the convenience installer as a production deployment shortcut.
+`npm start` is the idempotent local orchestrator. The host-side bootstrap uses only Node.js built-ins; Docker builds the application image and installs the project dependencies. It creates missing `.env` configuration and strong secrets without replacing valid existing secrets, creates the backup directory, validates the host and Compose configuration, reconciles containers, waits for the database migration and app startup, then verifies the health endpoint.
 
-## 2. Configure secrets
+Useful commands:
 
 ```bash
-cp .env.example .env
-openssl rand -hex 32
+npm run doctor          # read-only host check
+npm run bootstrap:dry-run # config + prerequisites; does not start services
+npm run test:bootstrap  # static architecture/bootstrap regression checks
+npm run build           # build dashboard; runs prebuild validation first
 ```
 
-Generate distinct random values for `POSTGRES_PASSWORD`, `NEXORA_APP_DB_PASSWORD`, and `NEXORA_ADMIN_TOKEN`. Put each value into `.env`. Restrict the file:
+Do not run `docker compose down -v` on the primary host. It deletes the named PostgreSQL volume. Keep an offline recovery copy of `.env` and the backup encryption key. If the existing database volume is found but a critical secret is missing, bootstrap deliberately stops instead of generating credentials that cannot unlock the old data.
 
-```bash
-chmod 600 .env
-```
+## Runtime manifest
 
-Never commit `.env` or copy secrets into frontend files.
+- Node.js: 22.x (exact major enforced by bootstrap).
+- Next.js: 16.4.6; React / React DOM: 19.3.1; node-postgres (`pg`): 8.23.1; Zod: 4.6.7. Direct dependency versions are pinned in `package.json`.
+- PostgreSQL container: major 17 (`postgres:17-bookworm`).
 
-## 3. Start privately
+Versions were checked against the current official package sources on 14 November 2026: [Next.js](https://www.npmjs.com/package/next), [React](https://www.npmjs.com/package/react), [node-postgres](https://www.npmjs.com/package/pg), [Zod](https://www.npmjs.com/package/zod).
 
-```bash
-docker compose config
-docker compose up -d --build
-docker compose ps
-```
+## What v0.3.0 starts
 
-Open `http://127.0.0.1:3000` on the host. Check:
+- `db`: PostgreSQL 17, private network, named persistent volume `nexora_pgdata`.
+- `migrate`: advisory-lock migration runner; creates missing roles/tables/indexes and grants runtime access; leaves existing schema and records in place.
+- `app`: Next.js dashboard and API; bound to `127.0.0.1` by default.
+- `backup`: dedicated PostgreSQL 17 + OpenSSL image; daily encrypted logical backup, HMAC authentication, decrypt/archive verification, 30-day local retention and a Docker healthcheck.
 
-```bash
-curl -fsS http://127.0.0.1:3000/api/v1/health
-```
+The app waits for the migration service to complete successfully. Compose dependency health conditions are documented by Docker. [Docker Compose service dependencies](https://docs.docker.com/reference/compose-file/services/).
 
-The dashboard/API is bound to localhost by default. PostgreSQL does not publish port 5432 to the host. Do not change this until the firewall/VPN plan is configured.
+## Domain-aware API documentation
 
-## 4. Create a project API key
+The website derives its current origin from `NEXORA_PUBLIC_URL`, the current Vercel deployment hostname (`VERCEL_URL`), the local request origin, or localhost. Preview deployments do not accidentally point to the production hostname. No deployment domain is hard-coded. Once the official domain is owned and configured, set `NEXORA_PUBLIC_URL` and redeploy; `/docs` and `/api/v1/openapi.json` resolve the matching API URLs automatically.
 
-```bash
-export NEXORA_URL="http://127.0.0.1:3000"
-export NEXORA_ADMIN_TOKEN="value-from-.env"
-curl -X POST "$NEXORA_URL/api/v1/admin/projects" \
-  -H "Content-Type: application/json" \
-  -H "x-nexora-admin-token: $NEXORA_ADMIN_TOKEN" \
-  -d '{"name":"Whiskay Bot","slug":"whiskay-bot","description":"Private WhatsApp bot runtime","environment":"production"}'
-```
+## Vercel transition
 
-Copy the returned `apiKey` immediately. Only its hash is stored in PostgreSQL. Do not put the key in a client app or commit it to Git.
+Vercel can host a dashboard/API preview while the official domain and server are not ready. Vercel does not run the local Docker orchestrator or host the persistent PostgreSQL volume. Without a configured database, the dashboard can build, but stateful API routes report `503` rather than pretending that a durable database exists.
 
-## 5. Connect another project on the same Docker host
+For a Vercel build with an already-provisioned PostgreSQL database, set `DATABASE_URL`. To run schema migrations during build, also set `NEXORA_MIGRATE_ON_BUILD=true` and a private owner/migration URL in `NEXORA_MIGRATION_DATABASE_URL`. Enable verified TLS with `NEXORA_DATABASE_SSL=true` for remote services.
 
-Attach that project's Compose service to the `nexora_private` network and call the API using the Docker service name `http://app:3000/api/v1/me` with its own server-side key:
+Vercel Hobby terms restrict use to personal/non-commercial use. Confirm a plan appropriate for business use before production. See [Vercel Terms](https://vercel.com/legal/terms) and [Functions limitations](https://vercel.com/docs/functions/limitations).
 
-```js
-const response = await fetch('http://app:3000/api/v1/me', {
-  headers: { Authorization: `Bearer ${process.env.NEXORA_PROJECT_API_KEY}` },
-});
-if (!response.ok) throw new Error(`Nexora API failed: ${response.status}`);
-const { project } = await response.json();
-```
+## Database durability boundary
 
-Other Compose stacks can join the pre-created `nexora_private` network using `external: true`. PostgreSQL is isolated on `nexora_db` and is not connected to project containers. Never make the database port public.
+There is no literally eternal database. v0.3.0 is designed not to auto-pause for inactivity on an owner-controlled Docker host. PostgreSQL data is kept in a named volume; a separate backup worker writes encrypted and authenticated dumps to `./backups` each day. This is a same-host backup only. Host/disk loss can destroy both database and local backups, so a second physical device or independent storage target and regular restore drills are mandatory before irreplaceable data is stored.
 
-Do not run `docker compose down -v` on the live host: `-v` removes the persistent database volume.
+PostgreSQL supports SQL dumps and continuous archiving/PITR as separate backup strategies. This release implements verified logical dumps, not WAL archiving/PITR. See [PostgreSQL 17 Backup and Restore](https://www.postgresql.org/docs/17/backup.html).
 
-## 6. Backup
+## Current limitations
 
-Create a local database dump:
+This is not yet a multi-node public cloud. It does not provision arbitrary project containers, provide automatic failover, off-host backup replication, object storage, API key rotation/revocation, full audit trails, metering, or rate limiting. These require a validated owner-controlled server and explicit resource/security policies.
 
-```bash
-bash scripts/backup-postgres.sh
-```
-
-This script keeps a local 14-day rolling set. A same-host backup is not disaster recovery. Copy dumps to a separate existing physical device, encrypt that copy, and periodically perform a restore drill. See `docs/PRIVATE-ZERO-COST-ARCHITECTURE.md`.
-
-Before a production release, generate and commit `package-lock.json` by running `npm install` on a networked development machine, then rebuild/test from the lockfile. This build package does not include a generated lockfile.
-
-## 7. Vercel
-
-Vercel Hobby is not the production home for Nexora Cloud. Its terms restrict the plan to personal or non-commercial use and reserve the right to disable deployments. See `VERCEL_DEPLOY.md`.
-
-## 8. Architecture and safeguards
-
-- `docs/PRIVATE-ZERO-COST-ARCHITECTURE.md` — target architecture, limits, networking, backup, hardware envelope, roadmap.
-- `docs/CONFIDENTIALITY-AND-OPERATIONS.md` — private-project security rules.
-- `db/schema.sql` — project registry schema.
-
-## Version boundary
-
-v0.2.0 is a private self-host deployment foundation and architecture revision. It has not been deployed to an owner-controlled host and has not passed a real hardware reboot/restore/network acceptance test. Do not store irreplaceable business data before those tests pass.
+See:
+- `docs/AUTOMATED-BOOTSTRAP.md`
+- `docs/DATA-DURABILITY.md`
+- `docs/VERCEL-TRANSITION.md`
+- `docs/CONFIDENTIALITY-AND-OPERATIONS.md`
+- `docs/PRIVATE-ZERO-COST-ARCHITECTURE.md`

@@ -1,27 +1,38 @@
 {
   "name": "nexora-cloud-control-plane",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/prebuild.mjs",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint ."
+    "start": "node scripts/bootstrap.mjs",
+    "start:app": "next start",
+    "doctor": "node scripts/bootstrap.mjs --doctor",
+    "bootstrap:dry-run": "node scripts/bootstrap.mjs --dry-run",
+    "migrate": "node scripts/migrate.mjs",
+    "test:bootstrap": "node scripts/self-test.mjs",
+    "lint": "eslint .",
+    "backup": "bash scripts/backup-postgres.sh",
+    "restore:verify": "bash scripts/restore-postgres.sh"
   },
   "dependencies": {
     "next": "16.4.6",
-    "pg": "^8.16.3",
+    "pg": "8.23.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "zod": "^4.1.12"
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^22.18.12",
-    "@types/pg": "^8.15.5",
-    "@types/react": "^19.1.16",
-    "@types/react-dom": "^19.1.9",
-    "eslint": "^9.38.0",
+    "@types/node": "22.18.12",
+    "@types/pg": "8.15.5",
+    "@types/react": "19.1.16",
+    "@types/react-dom": "19.1.9",
+    "eslint": "9.38.0",
     "eslint-config-next": "16.4.6",
-    "typescript": "^5.9.3"
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22.0.0 <23"
   }
 }

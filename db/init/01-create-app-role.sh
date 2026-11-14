@@ -5,5 +5,6 @@ set -eu
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   --set=app_user="$NEXORA_APP_DB_USER" \
   --set=app_password="$NEXORA_APP_DB_PASSWORD" <<'SQL'
-CREATE ROLE :"app_user" LOGIN PASSWORD :'app_password';
+SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'app_user', :'app_password')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_user')\gexec
 SQL
