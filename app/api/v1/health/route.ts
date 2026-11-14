@@ -10,7 +10,7 @@ export async function GET() {
       database: 'not_configured',
       schema: 'not_checked',
       mode: process.env.VERCEL ? 'vercel-dashboard-only' : 'unconfigured',
-      version: '0.3.0',
+      version: '0.4.0',
       action: 'Configure DATABASE_URL for a persistent PostgreSQL service. Vercel does not provide a persistent local database volume.',
     }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
@@ -19,17 +19,21 @@ export async function GET() {
       SELECT
         to_regclass('public.cloud_projects') IS NOT NULL AS projects_table,
         to_regclass('public.project_api_keys') IS NOT NULL AS api_keys_table,
-        to_regclass('public.nexora_schema_migrations') IS NOT NULL AS migrations_table
+        to_regclass('public.nexora_schema_migrations') IS NOT NULL AS migrations_table,
+        to_regclass('public.cloud_database_instances') IS NOT NULL AS databases_table,
+        to_regclass('public.cloud_storage_objects') IS NOT NULL AS storage_table,
+        to_regclass('public.cloud_metric_ingest_log') IS NOT NULL AS metrics_table
     `);
     const row = result.rows[0];
-    const schemaReady = Boolean(row.projects_table && row.api_keys_table && row.migrations_table);
+    const schemaReady = Boolean(row.projects_table && row.api_keys_table && row.migrations_table && row.databases_table && row.storage_table && row.metrics_table);
     return NextResponse.json({
       ok: schemaReady,
       service: 'nexora-cloud-control-plane',
       database: 'connected',
       schema: schemaReady ? 'ready' : 'migration_required',
+      capabilities: { multiDatabaseMetrics: Boolean(row.databases_table && row.metrics_table), fileInventory: Boolean(row.storage_table) },
       mode: process.env.NEXORA_RUNTIME_MODE || (process.env.VERCEL ? 'vercel-serverless' : 'unknown'),
-      version: '0.3.0',
+      version: '0.4.0',
     }, { status: schemaReady ? 200 : 503, headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     return NextResponse.json({
@@ -37,7 +41,7 @@ export async function GET() {
       service: 'nexora-cloud-control-plane',
       database: 'unavailable',
       schema: 'not_checked',
-      version: '0.3.0',
+      version: '0.4.0',
       error: process.env.NODE_ENV === 'production' ? 'database_connection_failed' : (error instanceof Error ? error.message : 'database_connection_failed'),
     }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }

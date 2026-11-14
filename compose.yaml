@@ -25,7 +25,7 @@ services:
     # PostgreSQL never publishes port 5432 to the host or public internet.
 
   migrate:
-    image: nexora-cloud:0.3.0
+    image: nexora-cloud:0.4.0
     build:
       context: .
       dockerfile: Dockerfile
@@ -35,6 +35,7 @@ services:
       NEXORA_MIGRATION_DATABASE_URL: postgres://${POSTGRES_USER:-nexora_owner}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-nexora}
       NEXORA_APP_DB_USER: ${NEXORA_APP_DB_USER:-nexora_app}
       NEXORA_APP_DB_PASSWORD: ${NEXORA_APP_DB_PASSWORD:?Set NEXORA_APP_DB_PASSWORD in .env}
+      NEXORA_METRICS_AGENT_API_KEY: ${NEXORA_METRICS_AGENT_API_KEY:?Set NEXORA_METRICS_AGENT_API_KEY in .env}
       NEXORA_DATABASE_SSL: "false"
     depends_on:
       db:
@@ -43,7 +44,7 @@ services:
       - nexora_db
 
   app:
-    image: nexora-cloud:0.3.0
+    image: nexora-cloud:0.4.0
     build:
       context: .
       dockerfile: Dockerfile
@@ -62,6 +63,7 @@ services:
       NEXORA_ADMIN_TOKEN: ${NEXORA_ADMIN_TOKEN:?Set NEXORA_ADMIN_TOKEN in .env}
       NEXORA_PUBLIC_URL: ${NEXORA_PUBLIC_URL:-}
       NEXORA_RUNTIME_MODE: self-hosted
+      NEXORA_METRICS_PUBLIC: ${NEXORA_METRICS_PUBLIC:-true}
     ports:
       - "127.0.0.1:${NEXORA_LOCAL_PORT:-3000}:3000"
     healthcheck:
@@ -75,7 +77,7 @@ services:
       - nexora_db
 
   backup:
-    image: nexora-cloud-backup:0.3.0
+    image: nexora-cloud-backup:0.4.0
     build:
       context: .
       dockerfile: Dockerfile.backup
@@ -103,6 +105,37 @@ services:
       retries: 2
       start_period: 10m
     networks:
+      - nexora_db
+
+
+  metrics-agent:
+    image: nexora-cloud:0.4.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["node", "scripts/metrics-agent.mjs"]
+    environment:
+      NEXORA_METRICS_API_URL: http://app:3000
+      NEXORA_METRICS_AGENT_API_KEY: ${NEXORA_METRICS_AGENT_API_KEY:?Set NEXORA_METRICS_AGENT_API_KEY in .env}
+      NEXORA_METRICS_DATABASE_URL: postgres://${POSTGRES_USER:-nexora_owner}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-nexora}
+      NEXORA_METRICS_INTERVAL_SECONDS: ${NEXORA_METRICS_INTERVAL_SECONDS:-60}
+      NEXORA_METRICS_PROVIDER: ${NEXORA_METRICS_PROVIDER:-self-hosted}
+      NEXORA_METRICS_LOCATION: ${NEXORA_METRICS_LOCATION:-primary-node}
+      NEXORA_METRIC_SOURCES_JSON: ${NEXORA_METRIC_SOURCES_JSON:-}
+    depends_on:
+      app:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('fs');try{const t=Date.now()-fs.statSync('/tmp/nexora-metrics-agent.last-success').mtimeMs;if(t>180000)process.exit(1)}catch{process.exit(1)}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    networks:
+      - nexora_private
       - nexora_db
 
 networks:

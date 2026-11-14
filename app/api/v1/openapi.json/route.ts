@@ -12,7 +12,7 @@ export async function GET(request: Request) {
       description: 'Private project identity and cloud control-plane API for Razzaq Ventures. Stateful routes require a provisioned PostgreSQL database.',
     },
     servers: [{ url: `${origin}/api/v1`, description: 'Current deployment origin, resolved dynamically at runtime.' }],
-    tags: [{ name: 'System' }, { name: 'Projects' }, { name: 'Administration' }],
+    tags: [{ name: 'System' }, { name: 'Projects' }, { name: 'Administration' }, { name: 'Metrics' }, { name: 'Storage' }],
     paths: {
       '/health': {
         get: {
@@ -53,12 +53,34 @@ export async function GET(request: Request) {
         },
       },
     },
+      '/metrics/ingest': {
+        post: {
+          tags: ['Metrics'], summary: 'Ingest normalized database telemetry from a project agent', operationId: 'ingestDatabaseMetrics', security: [{ bearerAuth: [] }],
+          requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/MetricsIngestRequest' } } } },
+          responses: { '200': { description: 'Metrics accepted' }, '400': { description: 'Invalid metrics payload' }, '401': { description: 'Invalid project API key' }, '403': { description: 'Missing metrics:write scope' }, '503': { description: 'Metrics database unavailable' } },
+        },
+      },
+      '/metrics/summary': {
+        get: {
+          tags: ['Metrics'], summary: 'Get aggregate database, size, file and top-three metrics', operationId: 'getMetricsSummary',
+          responses: { '200': { description: 'Aggregate telemetry summary' }, '404': { description: 'Disabled unless explicitly enabled behind private access' }, '503': { description: 'Persistent database unavailable' } },
+        },
+      },
+      '/storage/objects': {
+        post: {
+          tags: ['Storage'], summary: 'Register file metadata for inventory metrics (does not upload bytes)', operationId: 'registerStorageObject', security: [{ bearerAuth: [] }],
+          requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/StorageObjectRequest' } } } },
+          responses: { '201': { description: 'File metadata registered' }, '400': { description: 'Invalid object metadata' }, '401': { description: 'Invalid project API key' }, '403': { description: 'Missing storage:write scope' } },
+        },
+      },
     components: {
       securitySchemes: {
         bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'Nexora project API key' },
         adminToken: { type: 'apiKey', in: 'header', name: 'x-nexora-admin-token' },
       },
       schemas: {
+        MetricsIngestRequest: { type: 'object', required: ['databases'], properties: { agent: { type: 'string' }, databases: { type: 'array', maxItems: 100, items: { type: 'object', required: ['sourceKey','databaseName','sizeBytes'], properties: { sourceKey: { type: 'string' }, databaseName: { type: 'string' }, engine: { type: 'string', enum: ['postgresql','mysql','mariadb','mongodb','sqlite','redis','other'] }, provider: { type: 'string' }, location: { type: 'string' }, sizeBytes: { type: 'integer', minimum: 0 }, openConnections: { type: 'integer', minimum: 0 }, totalConnections: { type: 'integer', minimum: 0 } } } } } },
+        StorageObjectRequest: { type: 'object', required: ['objectKey','objectName','sizeBytes'], properties: { objectKey: { type: 'string' }, objectName: { type: 'string' }, contentType: { type: 'string' }, sizeBytes: { type: 'integer', minimum: 0 }, storageProvider: { type: 'string' }, storageLocation: { type: 'string' }, checksumSha256: { type: 'string' } } },
         ErrorResponse: { type: 'object', properties: { error: { type: 'string' }, message: { type: 'string' } }, required: ['error'] },
         Project: {
           type: 'object', properties: {

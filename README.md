@@ -1,6 +1,6 @@
 # NEXORA CLOUD — Private Control Plane
 
-**Razzaq Ventures · v0.3.0 · Confidential / Internal / Proprietary**
+**Razzaq Ventures · v0.4.0 · Confidential / Internal / Proprietary**
 
 Nexora Cloud is the private infrastructure control plane intended to coordinate project identity, API access, persistent database state, and service operations for Whiskay, AISYAH/Nexora AI, Whiskay RPG, Razzaq Ventures websites, and approved internal projects.
 
@@ -33,7 +33,7 @@ Do not run `docker compose down -v` on the primary host. It deletes the named Po
 
 Versions were checked against the current official package sources on 14 November 2026: [Next.js](https://www.npmjs.com/package/next), [React](https://www.npmjs.com/package/react), [node-postgres](https://www.npmjs.com/package/pg), [Zod](https://www.npmjs.com/package/zod).
 
-## What v0.3.0 starts
+## What v0.4.0 starts
 
 - `db`: PostgreSQL 17, private network, named persistent volume `nexora_pgdata`.
 - `migrate`: advisory-lock migration runner; creates missing roles/tables/indexes and grants runtime access; leaves existing schema and records in place.
@@ -56,7 +56,7 @@ Vercel Hobby terms restrict use to personal/non-commercial use. Confirm a plan a
 
 ## Database durability boundary
 
-There is no literally eternal database. v0.3.0 is designed not to auto-pause for inactivity on an owner-controlled Docker host. PostgreSQL data is kept in a named volume; a separate backup worker writes encrypted and authenticated dumps to `./backups` each day. This is a same-host backup only. Host/disk loss can destroy both database and local backups, so a second physical device or independent storage target and regular restore drills are mandatory before irreplaceable data is stored.
+There is no literally eternal database. v0.4.0 is designed not to auto-pause for inactivity on an owner-controlled Docker host. PostgreSQL data is kept in a named volume; a separate backup worker writes encrypted and authenticated dumps to `./backups` each day. This is a same-host backup only. Host/disk loss can destroy both database and local backups, so a second physical device or independent storage target and regular restore drills are mandatory before irreplaceable data is stored.
 
 PostgreSQL supports SQL dumps and continuous archiving/PITR as separate backup strategies. This release implements verified logical dumps, not WAL archiving/PITR. See [PostgreSQL 17 Backup and Restore](https://www.postgresql.org/docs/17/backup.html).
 
@@ -70,3 +70,12 @@ See:
 - `docs/VERCEL-TRANSITION.md`
 - `docs/CONFIDENTIALITY-AND-OPERATIONS.md`
 - `docs/PRIVATE-ZERO-COST-ARCHITECTURE.md`
+
+
+## Multi-database dashboard and automatic telemetry (v0.4.0)
+
+The home dashboard includes total registered databases, online databases, aggregate size (MiB), registered file-object count, top three databases by size, and last agent sync. The local Docker stack starts `metrics-agent` automatically; it polls PostgreSQL catalogs every 60 seconds and reports to the control plane with retry/backoff. The dashboard refreshes every 30 seconds.
+
+Set `NEXORA_METRICS_PUBLIC=true` only when the dashboard/API is protected by a private network, VPN, or authenticated access gateway. It is false by default. See `docs/MULTI-DATABASE-TELEMETRY.md` for adding remote PostgreSQL locations and the limits of non-PostgreSQL adapters. Metrics sync transfers metadata only, not database contents or files.
+
+Release notes: `docs/RELEASE-NOTES-v0.4.0.md`. Multi-database telemetry: `docs/MULTI-DATABASE-TELEMETRY.md`.

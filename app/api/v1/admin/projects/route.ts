@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     const apiKey = `nx_live_${randomBytes(32).toString('hex')}`;
     const prefix = apiKey.slice(0,16);
     await client.query(
-      `INSERT INTO project_api_keys (project_id,key_prefix,key_hash,label,scopes) VALUES ($1,$2,$3,'initial',ARRAY['project:read'])`,
+      `INSERT INTO project_api_keys (project_id,key_prefix,key_hash,label,scopes) VALUES ($1,$2,$3,'initial',ARRAY['project:read','metrics:write','storage:write'])`,
       [p.rows[0].id,prefix,sha256(apiKey)]
     );
     await client.query('COMMIT');

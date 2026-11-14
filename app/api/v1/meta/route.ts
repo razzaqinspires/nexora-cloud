@@ -6,7 +6,7 @@ export async function GET(request: Request) {
   const origin = resolvePublicOrigin(request.url);
   return NextResponse.json({
     service: 'nexora-cloud-control-plane',
-    version: '0.3.0',
+    version: '0.4.0',
     mode: process.env.NEXORA_RUNTIME_MODE || (process.env.VERCEL ? 'vercel-serverless' : 'unknown'),
     origin,
     apiBaseUrl: `${origin}/api/v1`,

@@ -1,4 +1,4 @@
-# Nexora Cloud Architecture — v0.3.0
+# Nexora Cloud Architecture — v0.4.0
 
 ## Deployment model
 
@@ -26,10 +26,13 @@
 ## Data durability boundary
 
 - `nexora_pgdata` persists through container lifecycle changes.
-- Backups are encrypted and authenticated, but stored on the same host in v0.3.0.
+- Backups are encrypted and authenticated, but stored on the same host in v0.4.0.
 - Off-host copies, WAL archiving/PITR, host replication, and failover remain future work.
 - Do not use `docker compose down -v` or `docker volume prune` on the live host.
 
 ## Current API scope
 
 Project registry, one-time API-key issuance, project identity verification, deployment metadata, health, and OpenAPI specification. Full API key rotation/revocation, rate limiting, audit trails, per-project database provisioning, storage API, and compute scheduling are not yet implemented.
+
+## Multi-database telemetry
+The control plane now aggregates database count, online status, total MiB, registered file metadata, and the top three largest databases. A dedicated PostgreSQL agent syncs measurements every 60 seconds with retry/backoff. See MULTI-DATABASE-TELEMETRY.md.

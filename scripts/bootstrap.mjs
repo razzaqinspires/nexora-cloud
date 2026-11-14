@@ -15,6 +15,9 @@ const REQUIRED_SECRETS = {
   NEXORA_ADMIN_TOKEN: 64,
   NEXORA_BACKUP_ENCRYPTION_KEY: 64,
 };
+// This is a newly introduced integration credential, not a credential that unlocks an existing database.
+// It may be generated during an upgrade without rotating the existing database/admin/backup secrets.
+const ADDITIVE_SECRETS = { NEXORA_METRICS_AGENT_API_KEY: 64 };
 const EXISTING_VOLUME_IDENTITY_KEYS = ['POSTGRES_DB', 'POSTGRES_USER', 'NEXORA_APP_DB_USER'];
 const args = new Set(process.argv.slice(2));
 const dryRun = args.has('--dry-run');
@@ -83,7 +86,18 @@ async function ensureEnv({ existingDatabaseVolume }) {
       log(`${key}: existing value retained.`);
     }
   }
-  const existingSecretValues = Object.keys(REQUIRED_SECRETS).map(key => readEnvValue(text, key).toLowerCase());
+  for (const [key, length] of Object.entries(ADDITIVE_SECRETS)) {
+    const current = readEnvValue(text, key);
+    if (!current || current.startsWith('REPLACE_') || current.startsWith('CHANGE_ME_')) {
+      text = setEnvLine(text, key, randomBytes(length / 2).toString('hex'));
+      log(`${key}: generated as a new additive integration credential; existing database secrets were not changed.`);
+    } else if (!/^[a-fA-F0-9]{64,}$/.test(current)) {
+      throw new Error(`${key} must be at least 64 hexadecimal characters. Generate it with: openssl rand -hex 32`);
+    } else {
+      log(`${key}: existing value retained.`);
+    }
+  }
+  const existingSecretValues = [...Object.keys(REQUIRED_SECRETS), ...Object.keys(ADDITIVE_SECRETS)].map(key => readEnvValue(text, key).toLowerCase());
   if (new Set(existingSecretValues).size !== existingSecretValues.length) {
     throw new Error('The PostgreSQL owner, runtime DB, admin, and backup secrets must all be different values.');
   }
@@ -106,7 +120,7 @@ async function ensureEnv({ existingDatabaseVolume }) {
 }
 function validateEnv(text) {
   const read = key => process.env[key] ?? readEnvValue(text, key);
-  for (const key of [...EXISTING_VOLUME_IDENTITY_KEYS, ...Object.keys(REQUIRED_SECRETS)]) {
+  for (const key of [...EXISTING_VOLUME_IDENTITY_KEYS, ...Object.keys(REQUIRED_SECRETS), ...Object.keys(ADDITIVE_SECRETS)]) {
     if (Object.hasOwn(process.env, key) && process.env[key] !== readEnvValue(text, key)) {
       throw new Error(`Process environment variable ${key} conflicts with the owner .env file. Unset the shell override or update .env deliberately; bootstrap will not let Compose silently use a different database identity or secret.`);
     }
@@ -193,7 +207,7 @@ async function main() {
     await mkdir(path.join(ROOT, 'backups'), { recursive: true, mode: 0o700 });
     await chmod(path.join(ROOT, 'backups'), 0o700);
   }
-  for (const required of ['compose.yaml', 'Dockerfile', 'Dockerfile.backup', 'db/schema.sql', 'scripts/migrate.mjs', 'app/docs/page.tsx', 'app/api/v1/openapi.json/route.ts', 'scripts/backup-loop.sh', 'scripts/backup-health.sh']) {
+  for (const required of ['compose.yaml', 'Dockerfile', 'Dockerfile.backup', 'db/schema.sql', 'scripts/migrate.mjs', 'app/docs/page.tsx', 'app/api/v1/openapi.json/route.ts', 'scripts/backup-loop.sh', 'scripts/backup-health.sh', 'scripts/metrics-agent.mjs']) {
     if (!(await exists(path.join(ROOT, required)))) throw new Error(`Required project file is missing: ${required}. Restore it from the official Nexora Cloud source package.`);
   }
   log('Docker, Compose, project files, and Node.js are available.');
@@ -206,12 +220,13 @@ async function main() {
   log('Re-running the idempotent migration job under an advisory lock...');
   await run('docker', ['compose', 'up', '-d', '--build', '--force-recreate', 'migrate']);
   log('Starting or reconciling the API and encrypted backup worker...');
-  await run('docker', ['compose', 'up', '-d', '--build', 'app', 'backup']);
+  await run('docker', ['compose', 'up', '-d', '--build', 'app', 'backup', 'metrics-agent']);
   const port = process.env.NEXORA_LOCAL_PORT || readEnvValue(envText, 'NEXORA_LOCAL_PORT') || '3000';
   const health = await waitForHealth(`http://127.0.0.1:${port}/api/v1/health`);
   log(`Nexora API and schema are healthy: ${health.service} ${health.version}.`);
   await waitForBackupHealthy(Number(process.env.NEXORA_BACKUP_STARTUP_TIMEOUT_MS || 600000));
-  log('Nexora Cloud core and initial encrypted backup are ready.');
+  await waitForMetricsAgentHealthy(Number(process.env.NEXORA_METRICS_STARTUP_TIMEOUT_MS || 180000));
+  log('Nexora Cloud core, initial encrypted backup, and first metrics transfer are ready.');
   log(`Dashboard: http://127.0.0.1:${port}`);
   log(`API documentation: http://127.0.0.1:${port}/docs`);
   log('Database, migrations, and encrypted local backup service are managed by Docker Compose.');
